@@ -4,16 +4,16 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
-#include"shaderClass.h"
-#include"VBO.h"
-#include"EBO.h"
-#include"VAO.h"
-#include"textureClass.h"
-#include"TextureArray.h"
+#include "shaderClass.h"
+#include "VBO.h"
+#include "EBO.h"
+#include "VAO.h"
+#include "textureClass.h"
+#include "TextureArray.h"
 
-#include"Camera.h"
-#include"Chunk.h"
-#include"FBO.h"
+#include "Camera.h"
+#include "Chunk.h"
+#include "FBO.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
