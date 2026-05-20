@@ -9,7 +9,11 @@
 static FastNoiseLite noise = []() {
 	FastNoiseLite n;
 	n.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
-	n.SetFrequency(0.003f);
+	n.SetFrequency(0.001f);
+	n.SetFractalType(FastNoiseLite::FractalType_FBm); // Fractal Brownian Motion
+	n.SetFractalOctaves(4);        // broj slojeva
+	n.SetFractalLacunarity(2.5f);  // koliko se frekvencija povećava po oktavi
+	n.SetFractalGain(0.5f);        // koliko se amplituda smanjuje po oktavi
 	return n;
 }();
 
@@ -37,22 +41,44 @@ bool Chunk::getBlock(int x, int y, int z) {
 }
 
 void Chunk::Generate() {
+	chunkMask.reset();
+	memset(blocks, BLOCK_AIR, CHUNK_VOLUME);
+
 	for (int x = 0; x < CHUNK_SIZE_X; x++) {
 		for (int z = 0; z < CHUNK_SIZE_Z; z++) {
 
 			float worldX = Position.x + x;
 			float worldZ = Position.z + z;
-			int height = (int)(noise.GetNoise(worldX, worldZ) * 20.0f) + 35;
+
+			float n = noise.GetNoise(worldX, worldZ);   // baze, niske frekvencije
+
+			float r = (noise.GetNoise(worldX * 100, worldZ * 100) + 1.0f) * 0.5f;
+
+			n = (n + 1.0f) / 2.0f;
+			float normalizedN = n;
+
+			n = n * n * n * n * n;
+			
+			n = n * 2.0f - 1.0f;
+
+			int height = (int)(n*45)+45;
+
+
 
 			for (int y = 0; y < CHUNK_SIZE_Y; y++) {
 				int i = x + y * CHUNK_SIZE_X + z * CHUNK_SIZE_X * CHUNK_SIZE_Y;
-				khronos_uint8_t type;
-				if (y > height)          type = BLOCK_AIR;
-				else if (y == height)    type = BLOCK_GRASS;
-				else if (y > height - 3) type = BLOCK_DIRT;
-				else                     type = BLOCK_STONE;
+
+				if (y > height) {
+					if (y <= WATER_LEVEL) {
+						setBlock(x, y, z, BLOCK_WATER);
+					}
+					continue;
+				}
+
+				// samo blokovi ispod height dolaze ovde
+				khronos_uint8_t type = getHeightBlockType(y, height, normalizedN, r, WATER_LEVEL);
 				blocks[i] = type;
-				chunkMask.set(i, type != 0);
+				chunkMask.set(i, true);
 			}
 		}
 	}
@@ -61,8 +87,11 @@ void Chunk::Generate() {
 void Chunk::BuildMesh(GlobalEBO& globEBO) {
 
 	std::vector<khronos_uint32_t> vertices;
-	vertices.reserve(CHUNK_VOLUME);
+	vertices.reserve(128*128);
 	quadCount = 0;
+	std::vector<khronos_uint32_t> waterVertices;
+	waterVertices.reserve(1024);
+	waterQuadCount = 0;
 
 	for (int x = 0;x < CHUNK_SIZE_X;x++) {
 		
@@ -77,13 +106,18 @@ void Chunk::BuildMesh(GlobalEBO& globEBO) {
 				khronos_uint8_t b = blocks[index(x, y, z)];
 				const BlockDef& def = BLOCK_DEFS[b];
 
-				if (isTransparent(x, y + 1, z)) AddQuad(vertices, x, y, z, FACE_TOP, def.texTop);
-				if (isTransparent(x, y - 1, z)) AddQuad(vertices, x, y, z, FACE_BOTTOM, def.texBottom);
-				if (isTransparent(x + 1, y, z)) AddQuad(vertices, x, y, z, FACE_EAST, def.texSide);
-				if (isTransparent(x - 1, y, z)) AddQuad(vertices, x, y, z, FACE_WEST, def.texSide);
-				if (isTransparent(x, y, z + 1)) AddQuad(vertices, x, y, z, FACE_NORTH, def.texSide);
-				if (isTransparent(x, y, z - 1)) AddQuad(vertices, x, y, z, FACE_SOUTH, def.texSide);
+				if (b == BLOCK_WATER) {
+					//if (!getBlock(x, y+1, z)) AddQuad(waterVertices, x, y, z, FACE_TOP, def.texTop,waterQuadCount++);
+					continue;
+				}
 
+				if (isTransparent(x, y + 1, z)) AddQuad(vertices, x, y, z, FACE_TOP, def.texTop, quadCount++);
+				if (isTransparent(x, y - 1, z)) AddQuad(vertices, x, y, z, FACE_BOTTOM, def.texBottom, quadCount++);
+				if (isTransparent(x + 1, y, z)) AddQuad(vertices, x, y, z, FACE_EAST, def.texSide, quadCount++);
+				if (isTransparent(x - 1, y, z)) AddQuad(vertices, x, y, z, FACE_WEST, def.texSide, quadCount++);
+				if (isTransparent(x, y, z + 1)) AddQuad(vertices, x, y, z, FACE_NORTH, def.texSide, quadCount++);
+				if (isTransparent(x, y, z - 1)) AddQuad(vertices, x, y, z, FACE_SOUTH, def.texSide, quadCount++);
+				
 			}
 		}
 		
@@ -92,13 +126,16 @@ void Chunk::BuildMesh(GlobalEBO& globEBO) {
 	if (quadCount == 0) return;
 
 	totalWorldQuads += this->quadCount;
+	totalWorldQuads += this->waterQuadCount;
 
 	/*auto t1 = std::chrono::high_resolution_clock::now();*/
-	UploadMesh(vertices, globEBO);
+	UploadMesh(vertices, globEBO, VBO1, VAO1);
+	UploadMesh(waterVertices, globEBO, VBO2, VAO2);
 	/*auto t2 = std::chrono::high_resolution_clock::now();
 	printf("Upload: %.2f ms\n", std::chrono::duration<float, std::milli>(t2 - t1).count());*/
 
 	std::vector<khronos_uint32_t>().swap(vertices);
+	std::vector<khronos_uint32_t>().swap(waterVertices);
 }
 
 void Chunk::Render() {
@@ -107,6 +144,14 @@ void Chunk::Render() {
 	VAO1.Bind();
 	glDrawElements(GL_TRIANGLES, quadCount * 6, GL_UNSIGNED_INT, nullptr);
 	VAO1.Unbind();
+
+}
+void Chunk::RenderWater() {
+	if (waterQuadCount == 0) return;
+
+	VAO2.Bind();
+	glDrawElements(GL_TRIANGLES, waterQuadCount * 6, GL_UNSIGNED_INT, nullptr);
+	VAO2.Unbind();
 }
 
 uint32_t Chunk::PackVertex(uint32_t x, uint32_t y, uint32_t z, Face face, uint32_t vertexId, uint32_t textureId) {
@@ -118,23 +163,23 @@ uint32_t Chunk::PackVertex(uint32_t x, uint32_t y, uint32_t z, Face face, uint32
 		((textureId & 0xFF) << 24);   // 8 bita za teksturu
 }
 
-void Chunk::UploadMesh(std::vector<khronos_uint32_t>& vertices, GlobalEBO& globEBO) {
+void Chunk::UploadMesh(std::vector<khronos_uint32_t>& vertices, GlobalEBO& globEBO, VBO& vbo, VAO& vao) {
 
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	glBindVertexArray(0);
 
 	
-	VBO1 = VBO(vertices.data(), vertices.size() * sizeof(khronos_uint32_t));
+	vbo = VBO(vertices.data(), vertices.size() * sizeof(khronos_uint32_t));
 
-	VAO1.Bind();
-	VAO1.LinkVBOInt(VBO1, 0, 1, GL_UNSIGNED_INT, sizeof(khronos_uint32_t), 0);
+	vao.Bind();
+	vao.LinkVBOInt(vbo, 0, 1, GL_UNSIGNED_INT, sizeof(khronos_uint32_t), 0);
 	globEBO.Bind();
 
-	VAO1.Unbind();
-	VBO1.Unbind();
+	vao.Unbind();
+	vbo.Unbind();
 }
 
-inline void Chunk::AddQuad(std::vector<khronos_uint32_t>& vertices, int x, int y, int z, Face face, khronos_uint8_t texLayer) {
+inline void Chunk::AddQuad(std::vector<khronos_uint32_t>& vertices, int x, int y, int z, Face face, khronos_uint8_t texLayer, int whichQuadCount) {
 	const auto& f = kFaceVerts[face];
 	const uint32_t sharedBits = ((uint32_t)face << 19) | ((uint32_t)texLayer << 24);
 
@@ -167,7 +212,6 @@ inline void Chunk::AddQuad(std::vector<khronos_uint32_t>& vertices, int x, int y
 		sharedBits
 	);
 
-	quadCount++;
 }
 
 bool Chunk::isTransparent(int x, int y, int z){
@@ -175,22 +219,46 @@ bool Chunk::isTransparent(int x, int y, int z){
 
 	if (x < 0) {
 		if (neighbors[3] == nullptr) return true;
-		return neighbors[3]->blocks[index(CHUNK_SIZE_X - 1, y, z)] == 0;
+		return !BLOCK_DEFS[neighbors[3]->blocks[index(CHUNK_SIZE_X - 1, y, z)]].opaque;
 	}
 	if (x >= CHUNK_SIZE_X) {
 		if (neighbors[2] == nullptr) return true;
-		return neighbors[2]->blocks[index(0, y, z)] == 0;
+		return !BLOCK_DEFS[neighbors[2]->blocks[index(0, y, z)]].opaque;
 	}
 
 	if (z < 0) {
 		if (neighbors[1] == nullptr) return true;
-		return neighbors[1]->blocks[index(x, y, CHUNK_SIZE_Z - 1)] == 0;
+		return !BLOCK_DEFS[neighbors[1]->blocks[index(x, y, CHUNK_SIZE_Z - 1)]].opaque;
 	}
 	if (z >= CHUNK_SIZE_Z) {
 		if (neighbors[0] == nullptr) return true;
-		return neighbors[0]->blocks[index(x, y, 0)] == 0;
+		return !BLOCK_DEFS[neighbors[0]->blocks[index(x, y, 0)]].opaque;
 	}
 
 
-	return blocks[index(x, y, z)] == 0;
+	return !BLOCK_DEFS[blocks[index(x, y, z)]].opaque;
+}
+
+inline khronos_uint8_t Chunk::getHeightBlockType(int y, int height, float normalizedN, float r, int waterLevel) {
+
+	if (height <= waterLevel + 3) {
+		if (y > height - 3) return BLOCK_SAND;
+		if (y > height - 5) return BLOCK_DIRT;
+		return BLOCK_STONE;
+	}
+	else if (normalizedN < 0.85f - r * 0.06f) {
+		if (y == height)    return BLOCK_GRASS;
+		if (y > height - 3) return BLOCK_DIRT;
+		return BLOCK_STONE;
+	}
+	else if (normalizedN < 0.9f ) {
+		if (y == height)    return BLOCK_GRASS_SNOW;
+		if (y > height - 3) return BLOCK_DIRT;
+		return BLOCK_STONE;
+	}
+	else {
+		if (y >= height - 3) return BLOCK_SNOW;
+		if (y > height - 6)  return BLOCK_DIRT;
+		return BLOCK_STONE;
+	}
 }

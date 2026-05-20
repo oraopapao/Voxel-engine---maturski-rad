@@ -11,8 +11,9 @@
 
 const int CHUNK_SIZE_X = 16;
 const int CHUNK_SIZE_Z = 16;
-const int CHUNK_SIZE_Y = 64;
+const int CHUNK_SIZE_Y = 256;
 const int CHUNK_VOLUME = CHUNK_SIZE_X * CHUNK_SIZE_Y * CHUNK_SIZE_Z;
+const int WATER_LEVEL = 5;
 
 class Chunk {
 
@@ -25,8 +26,8 @@ public:
 
 	glm::vec3 Position;
 
-	VAO VAO1;
-	VBO VBO1;
+	VAO VAO1, VAO2;
+	VBO VBO1, VBO2;
 
 	static int totalWorldQuads;
 	int chunkX = 0, chunkZ = 0;
@@ -40,6 +41,7 @@ public:
 	void Generate();
 	void BuildMesh(GlobalEBO& globEBO);
 	void Render();
+	void RenderWater();
 private:
 	bool isTransparent(int x, int y, int z);
 
@@ -51,13 +53,13 @@ private:
 		FACE_EAST = 4,  // +X
 		FACE_WEST = 5   // -X
 	};
-	void UploadMesh(std::vector<khronos_uint32_t>& vertices, GlobalEBO& globEBO);
+	void UploadMesh(std::vector<khronos_uint32_t>& vertices, GlobalEBO& globEBO, VBO& vbo, VAO& vao);
 
 	uint32_t PackVertex(khronos_uint32_t x, khronos_uint32_t y, khronos_uint32_t z, Face face, khronos_uint32_t vertexId, khronos_uint32_t textureId);
 
-	khronos_uint32_t quadCount = 0;
+	khronos_uint32_t quadCount = 0, waterQuadCount = 0;
 
-	inline void AddQuad(std::vector<khronos_uint32_t>& vertices, int x, int y, int z, Face face, khronos_uint8_t texLayer);
+	inline void AddQuad(std::vector<khronos_uint32_t>& vertices, int x, int y, int z, Face face, khronos_uint8_t texLayer, int whichQuadCount);
 
 	//lookup tabela, jednom u memoriji
 	struct FaceVerts {
@@ -78,7 +80,7 @@ private:
 		// FACE_WEST (-X)
 		{ {0,0,0,0}, {0,1,1,0}, {1,1,0,0} },
 	};
-
+	khronos_uint8_t getHeightBlockType(int y, int height, float normalizedN, float r, int waterLevel);
 
 };
 

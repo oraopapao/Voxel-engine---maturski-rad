@@ -126,5 +126,11 @@
     <Image Include="stone.png">
       <Filter>Resource Files\Textures</Filter>
     </Image>
+    <Image Include="snow.png">
+      <Filter>Resource Files\Textures</Filter>
+    </Image>
+    <Image Include="snowtop.png">
+      <Filter>Resource Files\Textures</Filter>
+    </Image>
   </ItemGroup>
 </Project>

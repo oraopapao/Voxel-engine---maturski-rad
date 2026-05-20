@@ -81,7 +81,7 @@ int main() {
 	GLuint defaultModelLoc = glGetUniformLocation(shaderProgram.ID, "model");
 	GLuint defaultCamMatrixLoc = glGetUniformLocation(shaderProgram.ID, "camMatrix");
 
-	TextureArray textureArray({ "grasstop.png", "grass.png","dirt.png","stone.png"}, 16, 16);
+	TextureArray textureArray({ "grasstop.png", "grass.png", "dirt.png", "stone.png", "snowtop.png", "snow.png", "water.png", "sand.png"}, 16, 16);
 	textureArray.TexUnit(shaderProgram, "tex0", 0);
 
 	Camera camera(windowWidth, windowHeight, glm::vec3(0.0f, 10.0f, 0.0f));
@@ -90,13 +90,13 @@ int main() {
 	GlobalEBO globEBO;
 	std::unordered_map<int, int> chunkMap;
 	std::vector<Chunk> chunks;
-	chunks.reserve(64*64);
+	chunks.reserve(128*128);
 
 	auto start = std::chrono::high_resolution_clock::now();
 
-	for (int i = -32; i < 32; i++) {
-		for (int j = -32; j < 32; j++) {
-			chunkMap[i * 100 + j] = chunks.size();
+	for (int i = -64; i < 64; i++) {
+		for (int j = -64; j < 64; j++) {
+			chunkMap[i * 1000 + j] = chunks.size();
 			chunks.emplace_back(glm::vec3(i * CHUNK_SIZE_X, 0, j * CHUNK_SIZE_Z));
 			chunks.back().Generate();
 		}
@@ -104,14 +104,14 @@ int main() {
 
 	auto t1 = std::chrono::high_resolution_clock::now();
 
-	for (int i = -32; i < 32; i++) {
-		for (int j = -32; j < 32; j++) {
-			Chunk& chunk = chunks[chunkMap[i * 100 + j]];
+	for (int i = -64; i < 64; i++) {
+		for (int j = -64; j < 64; j++) {
+			Chunk& chunk = chunks[chunkMap[i * 1000 + j]];
 
-			if (chunkMap.count(i * 100 + (j + 1))) chunk.neighbors[0] = &chunks[chunkMap[i * 100 + (j + 1)]];
-			if (chunkMap.count(i * 100 + (j - 1))) chunk.neighbors[1] = &chunks[chunkMap[i * 100 + (j - 1)]];
-			if (chunkMap.count((i + 1) * 100 + j)) chunk.neighbors[2] = &chunks[chunkMap[(i + 1) * 100 + j]];
-			if (chunkMap.count((i - 1) * 100 + j)) chunk.neighbors[3] = &chunks[chunkMap[(i - 1) * 100 + j]];
+			if (chunkMap.count(i * 1000 + (j + 1))) chunk.neighbors[0] = &chunks[chunkMap[i * 1000 + (j + 1)]];
+			if (chunkMap.count(i * 1000 + (j - 1))) chunk.neighbors[1] = &chunks[chunkMap[i * 1000 + (j - 1)]];
+			if (chunkMap.count((i + 1) * 1000 + j)) chunk.neighbors[2] = &chunks[chunkMap[(i + 1) * 1000 + j]];
+			if (chunkMap.count((i - 1) * 1000 + j)) chunk.neighbors[3] = &chunks[chunkMap[(i - 1) * 1000 + j]];
 		}
 	}
 
@@ -126,7 +126,8 @@ int main() {
 	printf("Generate loop: %.2f ms\n", std::chrono::duration<float, std::milli>(t1 - start).count());
 	printf("Neighbors: %.2f ms\n", std::chrono::duration<float, std::milli>(t2 - t1).count());
 	printf("BuildMesh loop: %.2f ms\n", std::chrono::duration<float, std::milli>(t3 - t2).count());
-
+	std::vector<Chunk*> visibleChunks;
+	visibleChunks.reserve(chunks.size());
 
 	while (!glfwWindowShouldClose(window)) {
 		
@@ -150,6 +151,10 @@ int main() {
 		textureArray.Bind();
 
 		for (auto& chunk : chunks) {
+
+			glm::vec3 toChunk = chunk.Position - camera.Position;
+			if (glm::length(toChunk) > CHUNK_SIZE_X && glm::dot(camera.Orientation, glm::normalize(toChunk)) < 0.0f) continue;
+
 			glm::mat4 model = glm::translate(glm::mat4(1.0f), chunk.Position);
 			glUniformMatrix4fv(defaultModelLoc, 1, GL_FALSE, glm::value_ptr(model));
 			chunk.Render();
