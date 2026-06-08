@@ -3,6 +3,8 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
+#include <iostream>
+#include <chrono>
 
 #include "shaderClass.h"
 #include "VBO.h"
@@ -10,7 +12,6 @@
 #include "VAO.h"
 #include "textureClass.h"
 #include "TextureArray.h"
-
 #include "Camera.h"
 #include "Chunk.h"
 #include "FBO.h"
@@ -18,163 +19,156 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
-#include <iostream>
+// ─── globals ──────────────────────────────────────────────────────────────────
 
-#include <chrono>
-
-GLuint windowWidth = 1024;
-GLuint windowHeight = 1024;
-float deltaTime = 0.0f;
-float delta = 0.0f;
-float lastFrame = 0.0f;
+GLuint       windowWidth = 1024;
+GLuint       windowHeight = 1024;
+float        deltaTime = 0.0f;
+float        lastFrame = 0.0f;
 unsigned int amountOfFrames = 0;
+
+// ─── callbacks ────────────────────────────────────────────────────────────────
+
 void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
-	if (width == 0 || height == 0) return;
-
-	glViewport(0, 0, width, height);
-
-	Camera* camera = reinterpret_cast<Camera*>(glfwGetWindowUserPointer(window));
-
-	if (camera != nullptr) {
-		camera->width = width;
-		camera->height = height;
-		
-	}
+    if (width == 0 || height == 0) return;
+    glViewport(0, 0, width, height);
+    Camera* camera = reinterpret_cast<Camera*>(glfwGetWindowUserPointer(window));
+    if (camera) {
+        camera->width = width;
+        camera->height = height;
+    }
 }
 
+// ─── main ─────────────────────────────────────────────────────────────────────
+
 int main() {
-    
+
+    // ── init ─────────────────────────────────────────────────────────────────
     glfwInit();
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    glfwWindowHint(GLFW_SAMPLES, 4);
 
-	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
-	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
-	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-	glfwWindowHint(GLFW_SAMPLES, 4);
+    GLFWwindow* window = glfwCreateWindow(windowWidth, windowHeight, "Pavle Stepic - Maturski Rad", NULL, NULL);
+    if (!window) {
+        std::cout << "Failed to create GLFW window\n";
+        glfwTerminate();
+        return -1;
+    }
 
-	GLFWwindow* window = glfwCreateWindow(windowWidth, windowHeight, "Pavle Stepic - Maturski Rad", NULL, NULL);
+    glfwMakeContextCurrent(window);
+    gladLoadGL();
 
-	if (window == NULL) {
-		std::cout << "Failed to create GLFW window" << std::endl;
-		glfwTerminate();
-		return -1;
-	}
+    glViewport(0, 0, windowWidth, windowHeight);
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_BACK);
+    glFrontFace(GL_CCW);
+    glEnable(GL_MULTISAMPLE);
 
-	glfwMakeContextCurrent(window);
+    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
 
-	gladLoadGL();
+    // ── shaderi i teksture ───────────────────────────────────────────────────
+    Shader shaderProgram("default.vert", "default.frag");
+    shaderProgram.Activate();
+    glUniform1i(glGetUniformLocation(shaderProgram.ID, "tex0"), 0);
+    glUniform1i(glGetUniformLocation(shaderProgram.ID, "shadowMap"), 1);
 
-	glViewport(0, 0, windowWidth, windowHeight);
-	glEnable(GL_DEPTH_TEST);
-	glEnable(GL_CULL_FACE);
-	glCullFace(GL_BACK);
-	glFrontFace(GL_CCW);
-	glEnable(GL_MULTISAMPLE);
+    glm::vec3 lightDir = glm::normalize(glm::vec3(2.0f, 2.0f, 1.0f));
+    glUniform3fv(glGetUniformLocation(shaderProgram.ID, "lightDir"), 1, glm::value_ptr(lightDir));
 
-	glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+    GLuint defaultModelLoc = glGetUniformLocation(shaderProgram.ID, "model");
+    GLuint defaultCamMatrixLoc = glGetUniformLocation(shaderProgram.ID, "camMatrix");
 
-	Shader shaderProgram("default.vert", "default.frag");
-	shaderProgram.Activate();
-	glUniform1i(glGetUniformLocation(shaderProgram.ID, "tex0"), 0);
-	glUniform1i(glGetUniformLocation(shaderProgram.ID, "shadowMap"), 1);
-	glm::vec3 lightDir = glm::normalize(glm::vec3(2.0f, 2.0f, 1.0f));
-	glUniform3fv(glGetUniformLocation(shaderProgram.ID, "lightDir"), 1, glm::value_ptr(lightDir));
-	GLuint defaultModelLoc = glGetUniformLocation(shaderProgram.ID, "model");
-	GLuint defaultCamMatrixLoc = glGetUniformLocation(shaderProgram.ID, "camMatrix");
+    TextureArray textureArray(
+        { "grasstop.png", "grass.png", "dirt.png", "stone.png", "snowtop.png", "snow.png", "water.png", "sand.png" },
+        16, 16
+    );
+    textureArray.TexUnit(shaderProgram, "tex0", 0);
 
-	TextureArray textureArray({ "grasstop.png", "grass.png", "dirt.png", "stone.png", "snowtop.png", "snow.png", "water.png", "sand.png"}, 16, 16);
-	textureArray.TexUnit(shaderProgram, "tex0", 0);
+    // ── kamera ───────────────────────────────────────────────────────────────
+    Camera camera(windowWidth, windowHeight, glm::vec3(0.0f, 10.0f, 0.0f));
+    glfwSetWindowUserPointer(window, &camera);
 
-	Camera camera(windowWidth, windowHeight, glm::vec3(0.0f, 10.0f, 0.0f));
-	glfwSetWindowUserPointer(window, &camera);
+    // ── generisanje sveta ────────────────────────────────────────────────────
+    GlobalEBO globEBO;
+    std::unordered_map<int, int> chunkMap;
+    std::vector<Chunk> chunks;
+    const int RADIUS = 64;
+    chunks.reserve(RADIUS * RADIUS * 4);
 
-	GlobalEBO globEBO;
-	std::unordered_map<int, int> chunkMap;
-	std::vector<Chunk> chunks;
-	chunks.reserve(128*128);
+    auto start = std::chrono::high_resolution_clock::now();
 
-	auto start = std::chrono::high_resolution_clock::now();
+    for (int i = -RADIUS; i < RADIUS; i++)
+        for (int j = -RADIUS; j < RADIUS; j++) {
+            chunkMap[i * 1000 + j] = chunks.size();
+            chunks.emplace_back(glm::vec3(i * CHUNK_SIZE_X, 0, j * CHUNK_SIZE_Z));
+            chunks.back().Generate();
+        }
 
-	for (int i = -64; i < 64; i++) {
-		for (int j = -64; j < 64; j++) {
-			chunkMap[i * 1000 + j] = chunks.size();
-			chunks.emplace_back(glm::vec3(i * CHUNK_SIZE_X, 0, j * CHUNK_SIZE_Z));
-			chunks.back().Generate();
-		}
-	}
+    auto t1 = std::chrono::high_resolution_clock::now();
 
-	auto t1 = std::chrono::high_resolution_clock::now();
+    for (int i = -RADIUS; i < RADIUS; i++)
+        for (int j = -RADIUS; j < RADIUS; j++) {
+            Chunk& chunk = chunks[chunkMap[i * 1000 + j]];
+            if (chunkMap.count(i * 1000 + (j + 1))) chunk.neighbors[0] = &chunks[chunkMap[i * 1000 + (j + 1)]];
+            if (chunkMap.count(i * 1000 + (j - 1))) chunk.neighbors[1] = &chunks[chunkMap[i * 1000 + (j - 1)]];
+            if (chunkMap.count((i + 1) * 1000 + j)) chunk.neighbors[2] = &chunks[chunkMap[(i + 1) * 1000 + j]];
+            if (chunkMap.count((i - 1) * 1000 + j)) chunk.neighbors[3] = &chunks[chunkMap[(i - 1) * 1000 + j]];
+        }
 
-	for (int i = -64; i < 64; i++) {
-		for (int j = -64; j < 64; j++) {
-			Chunk& chunk = chunks[chunkMap[i * 1000 + j]];
+    auto t2 = std::chrono::high_resolution_clock::now();
 
-			if (chunkMap.count(i * 1000 + (j + 1))) chunk.neighbors[0] = &chunks[chunkMap[i * 1000 + (j + 1)]];
-			if (chunkMap.count(i * 1000 + (j - 1))) chunk.neighbors[1] = &chunks[chunkMap[i * 1000 + (j - 1)]];
-			if (chunkMap.count((i + 1) * 1000 + j)) chunk.neighbors[2] = &chunks[chunkMap[(i + 1) * 1000 + j]];
-			if (chunkMap.count((i - 1) * 1000 + j)) chunk.neighbors[3] = &chunks[chunkMap[(i - 1) * 1000 + j]];
-		}
-	}
+    for (auto& chunk : chunks)
+        chunk.BuildMesh(globEBO);
 
-	auto t2 = std::chrono::high_resolution_clock::now();
+    auto t3 = std::chrono::high_resolution_clock::now();
 
-	for (auto& chunk : chunks) {
-		chunk.BuildMesh(globEBO);
-	}
+    printf("Generate:  %.2f ms\n", std::chrono::duration<float, std::milli>(t1 - start).count());
+    printf("Neighbors: %.2f ms\n", std::chrono::duration<float, std::milli>(t2 - t1).count());
+    printf("BuildMesh: %.2f ms\n", std::chrono::duration<float, std::milli>(t3 - t2).count());
 
-	auto t3 = std::chrono::high_resolution_clock::now();
+    float loadTime = glfwGetTime();
 
-	printf("Generate loop: %.2f ms\n", std::chrono::duration<float, std::milli>(t1 - start).count());
-	printf("Neighbors: %.2f ms\n", std::chrono::duration<float, std::milli>(t2 - t1).count());
-	printf("BuildMesh loop: %.2f ms\n", std::chrono::duration<float, std::milli>(t3 - t2).count());
-	std::vector<Chunk*> visibleChunks;
-	visibleChunks.reserve(chunks.size());
+    while (!glfwWindowShouldClose(window)) {
+        
+        glClearColor(0.25f, 0.15f, 0.3f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-	while (!glfwWindowShouldClose(window)) {
-		
-		//main pass
-		glClearColor(0.25f, 0.15f, 0.3f, 1.0f);
-		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        float currentFrame = glfwGetTime();
+        deltaTime = currentFrame - lastFrame;
+        lastFrame = currentFrame;
 
-		float currentFrame = glfwGetTime();
-		deltaTime = currentFrame - lastFrame;
-		lastFrame = currentFrame;
+        shaderProgram.Activate();
 
-		shaderProgram.Activate();
-		#ifdef _DEBUG
-				shaderProgram.checkShaderError();
-		#endif
+        camera.Matrix(70.0f, 0.1f, 2000.0f, defaultCamMatrixLoc, "camMatrix");
+        camera.Inputs(window, deltaTime);
 
-		camera.Matrix(70.0f, 0.1f, 2000.0f, defaultCamMatrixLoc, "camMatrix");
-		camera.Inputs(window, deltaTime);
+        glActiveTexture(GL_TEXTURE0);
+        textureArray.Bind();
 
-		glActiveTexture(GL_TEXTURE0);
-		textureArray.Bind();
+        for (auto& chunk : chunks) {
+            glm::vec3 toChunk = chunk.Position - camera.Position;
+            if (glm::length(toChunk) > CHUNK_SIZE_X * 2 && glm::dot(camera.Orientation, glm::normalize(toChunk)) < -0.25f) continue;
 
-		for (auto& chunk : chunks) {
+            glm::mat4 model = glm::translate(glm::mat4(1.0f), chunk.Position);
+            glUniformMatrix4fv(defaultModelLoc, 1, GL_FALSE, glm::value_ptr(model));
+            chunk.Render();
+        }
 
-			glm::vec3 toChunk = chunk.Position - camera.Position;
-			if (glm::length(toChunk) > CHUNK_SIZE_X && glm::dot(camera.Orientation, glm::normalize(toChunk)) < 0.0f) continue;
+        glfwPollEvents();
+        glfwSwapBuffers(window);
+        amountOfFrames++;
+    }
 
-			glm::mat4 model = glm::translate(glm::mat4(1.0f), chunk.Position);
-			glUniformMatrix4fv(defaultModelLoc, 1, GL_FALSE, glm::value_ptr(model));
-			chunk.Render();
-		}
+    printf("FPS:   %.2f\n", amountOfFrames / glfwGetTime());
+    printf("ms:    %.4f\n", glfwGetTime() / amountOfFrames*1000);
+    printf("quads: %d\n", chunks[0].totalWorldQuads);
+    printf("verts: %d\n", chunks[0].totalWorldQuads * 4);
 
-
-		glfwPollEvents();
-		glfwSwapBuffers(window);
-		amountOfFrames++;
-	}
-
-	std::cout << amountOfFrames /  glfwGetTime() << std::endl; //prosecan fps ovaj run
-	std::cout << glfwGetTime() / amountOfFrames << std::endl; //prosecan 
-	std::cout << "quads: "+ std::to_string(chunks[0].totalWorldQuads) << std::endl; //prosecan ms
-	std::cout << "verts: " + std::to_string(chunks[0].totalWorldQuads * 4) << std::endl; //prosecan ms
-
-
-	shaderProgram.Delete();
-	textureArray.Delete();
-
-	glfwTerminate();
-	return 0;
+    shaderProgram.Delete();
+    textureArray.Delete();
+    glfwTerminate();
+    return 0;
 }
